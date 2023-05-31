@@ -21,12 +21,50 @@ class SoftQ(object):
 
         self.critic_target_update_frequency = agent_cfg.critic_target_update_frequency
         self.log_alpha = torch.tensor(np.log(agent_cfg.init_temp)).to(self.device)
+        # self.q_net = hydra.utils.instantiate(
+        #     agent_cfg.critic_cfg, args=args, device=self.device).to(self.device)
+        
+        ###FIX LATER###
+
+        agent_cfg.critic_cfg['obs_dim'] = 8
+        
         self.q_net = hydra.utils.instantiate(
             agent_cfg.critic_cfg, args=args, device=self.device).to(self.device)
+        
+        # agent_cfg.critic_cfg['obs_dim'] = 4
+        # agent_cfg.critic_cfg['action_dim'] = 1
+        from copy import copy
+
+        v_net = copy(agent_cfg.critic_cfg)
+        v_net["obs_dim"] = 4
+        v_net["action_dim"] = 1
+        
+
+        self.v_net = hydra.utils.instantiate(
+            v_net, args=args, device=self.device).to(self.device)
+        
+        print(self.v_net)
+        print(self.q_net)
+
+        policy_net = copy(agent_cfg.critic_cfg)
+        policy_net["obs_dim"] = 4
+        policy_net["action_dim"] = 2
+
+        self.policy_net = hydra.utils.instantiate(policy_net, args=args, device=self.device).to(
+            self.device)
+
         self.target_net = hydra.utils.instantiate(agent_cfg.critic_cfg, args=args, device=self.device).to(
             self.device)
+        
+        print(self.target_net)
+        ################################
+        
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.critic_optimizer = Adam(self.q_net.parameters(), lr=agent_cfg.critic_lr,
+                                     betas=agent_cfg.critic_betas)
+        self.v_net_optimizer = Adam(self.v_net.parameters(), lr=agent_cfg.critic_lr,
+                                     betas=agent_cfg.critic_betas)
+        self.policy_net_optimizer = Adam(self.policy_net.parameters(), lr=agent_cfg.critic_lr,
                                      betas=agent_cfg.critic_betas)
         self.train()
         self.target_net.train()
@@ -52,7 +90,10 @@ class SoftQ(object):
             state = np.array(state) / 255.0
         state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
         with torch.no_grad():
-            q = self.q_net(state)
+            # q = self.q_net(state)
+            
+            q = self.policy_net(state)
+
             dist = F.softmax(q/self.alpha, dim=1)
             # if sample:
             dist = Categorical(dist)
@@ -62,11 +103,13 @@ class SoftQ(object):
 
         return action.detach().cpu().numpy()[0]
 
-    def getV(self, obs):
-        q = self.q_net(obs)
-        v = self.alpha * \
-            torch.logsumexp(q/self.alpha, dim=1, keepdim=True)
-        return v
+
+    def get_log_prob(self, state, action):
+        q = self.policy_net(state)
+        dist = F.softmax(q/self.alpha, dim=1)
+        dist = Categorical(dist)
+        log_prob = dist.log_prob(action)
+        return log_prob
 
     def critic(self, obs, action, both=False):
         q = self.q_net(obs, both)
@@ -77,12 +120,48 @@ class SoftQ(object):
             return critic1, critic2
 
         return q.gather(1, action.long())
+    
+    def critic_state_only(self, obs, next_obs, both=False):
+        state = torch.cat([obs, next_obs], dim=1)
+        q = self.q_net(state, both) 
+        return q.max(dim=1)[0].reshape(-1, 1)
 
+    def getV_double_states(self, obs, next_obs):
+        state = torch.cat([obs, next_obs], dim=1)
+
+        q = self.q_net(state)
+        v = self.alpha * \
+            torch.logsumexp(q/self.alpha, dim=1, keepdim=True)
+        return v
+
+    def getQ_theta(self,obs,next_obs):
+        state = torch.cat([obs, next_obs], dim=1)
+        q = self.q_net(state, ) 
+        return q.max(dim=1)[0].reshape(-1, 1)
+
+    def getV_theta(self, obs,next_obs):
+        state = torch.cat([obs, next_obs], dim=1)
+        q = self.q_net(state)
+        v = self.alpha * \
+            torch.logsumexp(q/self.alpha, dim=1, keepdim=True)
+        return v
+    
+
+    def getV_phi(self,obs):
+        v = self.v_net(obs)
+        return v
+
+    def getV(self, obs):
+        q = self.q_net(obs)
+        v = self.alpha * \
+            torch.logsumexp(q/self.alpha, dim=1, keepdim=True)
+        return v
+    
     def get_targetV(self, obs):
         q = self.target_net(obs)
         target_v = self.alpha * \
             torch.logsumexp(q/self.alpha, dim=1, keepdim=True)
-        return target_v
+        return target_v 
 
     def update(self, replay_buffer, logger, step):
         obs, next_obs, action, reward, done = replay_buffer.get_samples(

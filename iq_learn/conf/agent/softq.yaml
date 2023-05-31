@@ -18,3 +18,8 @@ q_net:
   _target_: agent.softq_models.SimpleQNetwork
   obs_dim: ${agent.obs_dim}
   action_dim: ${agent.action_dim}
+
+v_net:
+  _target_: agent.softq_models.SimpleQNetwork
+  obs_dim: ${agent.obs_dim}
+  action_dim: ${agent.action_dim}

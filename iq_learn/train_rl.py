@@ -10,7 +10,7 @@ import hydra
 import numpy as np
 import torch
 import torch.nn.functional as F
-import wandb
+# import wandb
 from omegaconf import DictConfig, OmegaConf
 from tensorboardX import SummaryWriter
 
@@ -33,8 +33,8 @@ def get_args(cfg: DictConfig):
 @hydra.main(config_path="conf", config_name="config")
 def main(cfg: DictConfig):
     args = get_args(cfg)
-    wandb.init(project=args.env.name + '_rl', entity='iq-learn',
-               sync_tensorboard=True, reinit=True, config=args)
+    # wandb.init(project=args.env.name + '_rl', entity='iq-learn',
+    #            sync_tensorboard=True, reinit=True, config=args)
 
     # set seeds
     random.seed(args.seed)
@@ -111,7 +111,7 @@ def main(cfg: DictConfig):
                 if returns > best_eval_returns:
                     # Store best eval returns
                     best_eval_returns = returns
-                    wandb.run.summary["best_returns"] = best_eval_returns
+                    # wandb.run.summary["best_returns"] = best_eval_returns
                     save(agent, epoch, args, output_dir='results_best')
 
             # only store done true when episode finishes without hitting timelimit (allow infinite bootstrap)
@@ -129,7 +129,7 @@ def main(cfg: DictConfig):
                 learn_steps += 1
                 if learn_steps == LEARN_STEPS:
                     print('Finished!')
-                    wandb.finish()
+                    # wandb.finish()
                     return
 
                 losses = agent.update(memory_replay, logger, learn_steps)

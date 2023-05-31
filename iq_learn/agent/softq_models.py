@@ -103,6 +103,9 @@ class OfflineQNetwork(SoftQNetwork):
         self.fc3 = nn.Linear(64, action_dim)
 
     def _forward(self, x, *args):
+        # print(x.shape)
+        # if x.shape[1] == 4:
+        #     x = torch.cat([x,x],dim=1)
         x = self.elu(self.fc1(x))
         x = self.elu(self.fc2(x))
         x = self.fc3(x)
