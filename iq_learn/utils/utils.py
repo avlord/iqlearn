@@ -40,7 +40,7 @@ def evaluate(actor, env, num_episodes=10, vis=True):
 
         with eval_mode(actor):
             while not done:
-                action = actor.choose_action(state, sample=False)
+                action = actor.choose_action_policy(state, sample=False)
                 next_state, reward, done, info = env.step(action)
                 state = next_state
 

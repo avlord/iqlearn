@@ -130,7 +130,7 @@ def main(cfg: DictConfig):
                 action = env.action_space.sample()
             else:
                 with eval_mode(agent):
-                    action = agent.choose_action(state, sample=True)
+                    action = agent.choose_action_policy(state, sample=True)
             next_state, reward, done, _ = env.step(action)
             episode_reward += reward
             steps += 1
@@ -170,8 +170,8 @@ def main(cfg: DictConfig):
 
                 ######
                 # IQ-Learn Modification
-                agent.iq_update = types.MethodType(iq_update, agent)
-                agent.iq_update_critic = types.MethodType(iq_update_critic, agent)
+                agent.iq_update = types.MethodType(iq_learn_update, agent)
+                # agent.iq_update_critic = types.MethodType(iq_update_critic, agent)
                 losses = agent.iq_update(online_memory_replay,
                                          expert_memory_replay, logger, learn_steps)
                 ######
@@ -206,14 +206,17 @@ def save(agent, epoch, args, output_dir='results'):
 
 
 # Minimal IQ-Learn objective
-def iq_learn_update(self, policy_batch, expert_batch, logger, step):
+def iq_learn_update(self, policy_buffer, expert_buffer, logger, step):
     args = self.args
+    
+    policy_batch = policy_buffer.get_samples(self.batch_size, self.device)
+    expert_batch = expert_buffer.get_samples(self.batch_size, self.device)
     
     policy_obs, policy_next_obs, policy_action, policy_reward, policy_done = policy_batch
     expert_obs, expert_next_obs, expert_action, expert_reward, expert_done = expert_batch
 
-    if args.only_expert_states:
-        expert_batch = expert_obs, expert_next_obs, policy_action, expert_reward, expert_done
+    # if args.only_expert_states:
+        # expert_batch = expert_obs, expert_next_obs, policy_action, expert_reward, expert_done
 
     obs, next_obs, action, reward, done, is_expert = get_concat_samples(
         policy_batch, expert_batch, args)
@@ -223,17 +226,19 @@ def iq_learn_update(self, policy_batch, expert_batch, logger, step):
     ######
     # IQ-Learn minimal implementation with X^2 divergence (~15 lines)
     # Calculate 1st term of loss: -E_(ρ_expert)[Q(s, a) - γV(s')]
-    current_Q = self.critic(obs, action)
-    y = (1 - done) * self.gamma * self.getV(next_obs)
-    if args.train.use_target:
-        with torch.no_grad():
-            y = (1 - done) * self.gamma * self.get_targetV(next_obs)
+    
+    # current_Q = self.critic(obs, next_obs)
+    current_Q = self.getQ_theta(obs, next_obs)
 
+    # y = (1 - done) * self.gamma * self.getV(next_obs)
+    y = (1 - done) * self.gamma * self.getV_phi(next_obs)
+    
     reward = (current_Q - y)[is_expert]
     loss = -(reward).mean()
 
     # 2nd term for our loss (use expert and policy states): E_(ρ)[Q(s,a) - γV(s')]
-    value_loss = (self.getV(obs) - y).mean()
+    # value_loss = (self.getV(obs) - y).mean()
+    value_loss = (self.getV_phi(obs) - y).mean()
     loss += value_loss
 
     # Use χ2 divergence (adds a extra term to the loss)
@@ -241,10 +246,30 @@ def iq_learn_update(self, policy_batch, expert_batch, logger, step):
     loss += chi2_loss
     ######
 
+    ##HERE ADDING POLICY LOSS##
+    
+    policy_log_probs = self.get_log_probs(policy_obs, policy_action)
+    policy_log_probs = policy_log_probs.reshape(-1,1)
+
+    advantage = self.getQ_theta(policy_obs,policy_next_obs) - self.getV_phi(policy_obs)
+    advantage = advantage.reshape(-1,1)
+
+    policy_loss = -(policy_log_probs * advantage).mean()
+ 
+    loss += policy_loss
+    ##########################
+
     self.critic_optimizer.zero_grad()
+    self.v_net_optimizer.zero_grad()
+    self.policy_optimizer.zero_grad()
+    
     loss.backward()
+    
     self.critic_optimizer.step()
-    return loss
+    self.v_net_optimizer.step()
+    self.policy_optimizer.step()
+
+    return {'loss':loss}
 
 
 def iq_update_critic(self, policy_batch, expert_batch, logger, step):

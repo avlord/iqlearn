@@ -7,6 +7,8 @@ agent:
   action_dim: ??? # to be specified later
 
   critic_cfg: ${q_net}
+  actor_cfg: ${policy_net}
+  value_cfg: ${v_net}
   critic_lr: 1e-4
   critic_betas: [0.9, 0.999]
 
@@ -14,7 +16,18 @@ agent:
   critic_target_update_frequency: 4
   critic_tau: 0.1
 
+###ONLY FOR CARTPOLE###
 q_net:
   _target_: agent.softq_models.SimpleQNetwork
-  obs_dim: ${agent.obs_dim}
+  obs_dim: 8
+  action_dim: 1
+
+v_net:
+  _target_: agent.softq_models.SimpleQNetwork
+  obs_dim: 4
+  action_dim: 1
+
+policy_net:
+  _target_: agent.softq_models.SimpleQNetwork
+  obs_dim: 4
   action_dim: ${agent.action_dim}

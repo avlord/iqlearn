@@ -21,15 +21,39 @@ class SoftQ(object):
 
         self.critic_target_update_frequency = agent_cfg.critic_target_update_frequency
         self.log_alpha = torch.tensor(np.log(agent_cfg.init_temp)).to(self.device)
+        
         self.q_net = hydra.utils.instantiate(
             agent_cfg.critic_cfg, args=args, device=self.device).to(self.device)
+
+        self.v_net = hydra.utils.instantiate(
+            agent_cfg.value_cfg, args=args, device=self.device).to(self.device)
+        
+        self.policy_net = hydra.utils.instantiate(
+            agent_cfg.actor_cfg, args=args, device=self.device).to(self.device)
+
+
         self.target_net = hydra.utils.instantiate(agent_cfg.critic_cfg, args=args, device=self.device).to(
             self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
+        
         self.critic_optimizer = Adam(self.q_net.parameters(), lr=agent_cfg.critic_lr,
                                      betas=agent_cfg.critic_betas)
+
+        self.v_net_optimizer = Adam(self.v_net.parameters(), lr=agent_cfg.critic_lr,
+                                     betas=agent_cfg.critic_betas)
+
+        self.policy_optimizer = Adam(self.policy_net.parameters(), lr=agent_cfg.critic_lr,
+                                     betas=agent_cfg.critic_betas)
+        
         self.train()
+
+        
+
+
         self.target_net.train()
+        self.v_net.train()
+        self.policy_net.train()
+
 
     def train(self, training=True):
         self.training = training
@@ -61,6 +85,35 @@ class SoftQ(object):
             #     action = torch.argmax(dist, dim=1)
 
         return action.detach().cpu().numpy()[0]
+
+    def choose_action_policy(self, state, sample=False):
+        if isinstance(state, LazyFrames):
+            state = np.array(state) / 255.0
+        state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
+        with torch.no_grad():
+            action = self.policy_net(state)
+            
+            action = torch.argmax(action, dim=1)
+
+        return action.detach().cpu().numpy()[0]
+
+    def getQ_theta(self, obs,next_obs):
+        state = torch.concat([obs,next_obs],dim=1)
+        return self.q_net(state)
+    
+    def getV_phi(self, obs):
+        return self.v_net(obs)
+
+    def get_log_probs(self, obs, actions):
+        q = self.policy_net(obs)
+       
+        dist = F.softmax(q/self.alpha, dim=1)
+     
+        dist = Categorical(dist)
+        log_probs = dist.log_prob(actions.reshape(-1))
+
+        return log_probs
+
 
     def getV(self, obs):
         q = self.q_net(obs)
